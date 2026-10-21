@@ -2,12 +2,16 @@ import type { SessionMessageAssistant, SessionMessageInfo, SessionMessageUser } 
 import { frameLoop, prefersReducedMotion, Spring } from "@opencode/ui/motion"
 import { createEffect, createMemo, createSelector, For, onCleanup, Show, type Accessor } from "solid-js"
 import { createStore } from "solid-js/store"
+import { Schema } from "effect"
 import { readPromptPresentation } from "@/composer/comment-note"
+import { useLanguage } from "@/runtime/i18n/language"
+import { Persistence } from "@/runtime/persistence/schema"
+import { Persist, persisted } from "@/runtime/persistence/storage"
 import { useServerSDK } from "@/runtime/server/client"
 
 const turnPageLimit = 200
 
-// Previews fade out after a few lines; keep only enough text to fill them.
+// Previews clamp to a few lines; keep only enough text to fill them.
 const previewLength = 400
 
 // Keep index loading clear of session entry, tab switch rendering and the timeline's own history requests.
@@ -16,24 +20,25 @@ const railDelay = 1000
 // The rail lists at most this many of the newest turns.
 const indexLimit = 1000
 
-// Resting on an unloaded turn fetches its reply; sweeping across the rail fetches nothing.
-const replyHoverDelay = 150
+// Messages read back from the next turn to find an unloaded turn's reply. One read also fills the replies of the
+// older turns it reaches, so their previews are ready before the pointer gets there.
+const replyScanLimit = 40
 
-const previewHoverDelay = 100
+// Each tick keeps at least this many pixels; a rail with more turns than fit shows an even sample of them.
+const tickMinPitch = 4
 
-// Messages read back from the next turn to find an unloaded turn's reply.
-const replyScanLimit = 20
+// Ticks within this many pixels of the pointer lengthen slightly towards it.
+const waveRadius = 16
 
-// Ticks within this many pixels of the pointer swell towards it, like a dock.
-const waveRadius = 48
-
-const tickWidths = { default: 7, active: 12, peak: 22 }
+const tickWidths = { default: 8, active: 12, peak: 16 }
 
 // The prompt's first line sits level with its tick: card padding, bubble padding, then half a 16px line.
 const previewAnchor = 20
 
-// The preview at its tallest, with both texts clamped. Clamping to it keeps the card still while a reply loads.
-const previewMaxHeight = 142
+// The preview at its tallest, with every text clamped. Clamping to it keeps the card still while a reply loads.
+const previewMaxHeight = 196
+
+const HintSchema = Persistence.struct({ used: Schema.Boolean })
 
 type TurnNavigatorProps = {
   sessionID: string
@@ -114,20 +119,30 @@ export function TurnNavigator(props: TurnNavigatorProps) {
 
 function TurnRail(props: TurnNavigatorProps & { index?: Map<string, string>; root: HTMLDivElement }) {
   const sdk = useServerSDK()
+  const language = useLanguage()
+  // The preview explains a click until the rail has been used once.
+  const [hint, setHint, , hintReady] = persisted(Persist.global("turn-navigator"), HintSchema, { used: false })
 
   const [state, setState] = createStore<{
     hover?: string
     // The previewed turn, kept while the preview fades out.
     shown?: string
-    open: boolean
     // Fetched replies by user message ID; null while loading or when there is no reply text.
     replies: Record<string, string | null>
-  }>({ open: false, replies: {} })
+    height: number
+  }>({ replies: {}, height: props.root.clientHeight })
+
+  const observer = new ResizeObserver((entries) => setState("height", entries[0]!.contentRect.height))
+  observer.observe(props.root)
+  onCleanup(() => observer.disconnect())
 
   const loaded = createMemo(
     () =>
       new Map(props.messages().flatMap((message) => (message.type === "user" ? [[message.id, message] as const] : []))),
   )
+
+  const same = (previous: string[], next: string[]) =>
+    previous.length === next.length && previous.every((id, index) => id === next[index])
 
   // Timeline order, as the server lists it. IDs from other clients do not sort chronologically, so neither the order
   // nor the reverted boundary may compare them. Streaming replaces the loaded messages on every delta, so the list keeps
@@ -144,15 +159,41 @@ function TurnRail(props: TurnNavigatorProps & { index?: Map<string, string>; roo
       return reverted === -1 ? ids : ids.slice(0, reverted)
     },
     [],
-    {
-      equals: (previous, next) => previous.length === next.length && previous.every((id, index) => id === next[index]),
-    },
+    { equals: same },
   )
+
+  // The turns that get a tick: all of them, or an even sample that keeps the first and latest turns.
+  const marks = createMemo(
+    () => {
+      const ids = turns()
+      // The rail's vertical padding takes 48px of the column.
+      const count = Math.min(ids.length, Math.max(2, Math.floor((state.height - 48) / tickMinPitch)))
+
+      if (count >= ids.length) return ids
+
+      return Array.from({ length: count }, (_, index) => ids[Math.round((index * (ids.length - 1)) / (count - 1))]!)
+    },
+    [],
+    { equals: same },
+  )
+
+  // A visible turn without a tick of its own marks the nearest one.
+  const activeMarks = createMemo(() => {
+    const ids = turns()
+    const ticks = marks()
+    const visible = props.visibleUserMessageIDs()
+
+    if (ticks.length === ids.length) return visible
+    const scale = (ticks.length - 1) / Math.max(1, ids.length - 1)
+
+    return new Set(ids.flatMap((id, index) => (visible.has(id) ? [ticks[Math.round(index * scale)]!] : [])))
+  })
 
   const abort = new AbortController()
   onCleanup(() => abort.abort())
 
-  // The turn's latest reply is the newest assistant text between its prompt and the next turn.
+  // A turn's latest reply is the newest assistant text between its prompt and the next turn. The read reaches back
+  // through older turns too, and every turn it covers whole gets its reply.
   const loadReply = async (id: string) => {
     setState("replies", id, null)
     const list = turns()
@@ -166,46 +207,41 @@ function TurnRail(props: TurnNavigatorProps & { index?: Map<string, string>; roo
       { signal: abort.signal },
     )
 
-    const end = page.data.findIndex((message) => message.type === "user")
+    const starts = page.data.flatMap((message, index) => (message.type === "user" ? [index] : []))
 
-    if (end !== -1 && page.data[end]!.id !== id) return
+    // A reply longer than the read has no prompt in it; all of it belongs to this turn.
+    const spans = starts.length
+      ? starts.map((start) => ({ id: page.data[start]!.id, end: start }))
+      : [{ id, end: page.data.length }]
 
-    const replies = (end === -1 ? page.data : page.data.slice(0, end)).filter(
-      (message): message is SessionMessageAssistant => message.type === "assistant",
-    )
+    if (spans[0]!.id !== id) return
 
-    setState("replies", id, replyText(replies.toReversed()) ?? null)
+    spans.forEach((span, turn) => {
+      if (span.id !== id && state.replies[span.id] !== undefined) return
+
+      const replies = page.data
+        .slice(turn === 0 ? 0 : spans[turn - 1]!.end + 1, span.end)
+        .filter((message): message is SessionMessageAssistant => message.type === "assistant")
+
+      setState("replies", span.id, replyText(replies.toReversed()) ?? null)
+    })
   }
 
   createEffect(() => {
     const id = state.hover
 
     if (!id || loaded().has(id) || state.replies[id] !== undefined) return
-    const timer = setTimeout(() => void loadReply(id).catch(() => undefined), replyHoverDelay)
-    onCleanup(() => clearTimeout(timer))
+    void loadReply(id).catch(() => undefined)
   })
 
-  const active = createSelector(props.visibleUserMessageIDs, (id: string, visible) => visible.has(id))
+  const active = createSelector(activeMarks, (id: string, visible) => visible.has(id))
   const hovered = createSelector(() => state.hover)
-  const hovering = createMemo(() => !!state.hover)
-
-  // Only the first preview waits; moving along an engaged rail switches it immediately.
-  createEffect(() => {
-    if (!hovering()) {
-      setState("open", false)
-
-      return
-    }
-
-    const timer = setTimeout(() => setState("open", true), previewHoverDelay)
-    onCleanup(() => clearTimeout(timer))
-  })
 
   // A closed preview keeps its last content for the fade-out without following a streaming reply.
   const preview = createMemo((previous?: { prompt?: string; response?: string }) => {
     const id = state.shown
 
-    if (!id || !state.open) return previous
+    if (!id || !state.hover) return previous
     const message = loaded().get(id)
 
     return {
@@ -238,7 +274,7 @@ function TurnRail(props: TurnNavigatorProps & { index?: Map<string, string>; roo
     spring === motion.opacity || !prefersReducedMotion() ? spring.step(dt) : spring.snap(spring.target).value
 
   const paint = (dt: number) => {
-    const ids = turns()
+    const ids = marks()
     const pitch = rail.height / Math.max(1, ids.length)
 
     if (pointer !== undefined && pitch > 0) {
@@ -271,10 +307,12 @@ function TurnRail(props: TurnNavigatorProps & { index?: Map<string, string>; roo
       tick.element.style.transform = `scaleX(${scale})`
     })
 
-    motion.opacity.set(state.open ? 1 : 0)
-
-    // A preview that opens from hidden appears in place; one already showing glides to the next turn.
+    // The preview appears on the pointer's first frame, in place; one already showing glides to the next turn, and a
+    // closing one fades.
     if (motion.opacity.value === 0) motion.top.snap(motion.top.target)
+
+    if (pointer !== undefined) motion.opacity.snap(1)
+    motion.opacity.set(pointer === undefined ? 0 : 1)
     const opacity = step(motion.opacity, dt)
 
     if (card) {
@@ -314,10 +352,9 @@ function TurnRail(props: TurnNavigatorProps & { index?: Map<string, string>; roo
     wake()
   }
 
-  // Resting widths follow the visible turns, and the preview follows its open state.
+  // Resting widths follow the visible turns.
   createEffect(() => {
-    turns().forEach((id) => active(id))
-    void state.open
+    marks().forEach((id) => active(id))
     wake()
   })
 
@@ -337,14 +374,17 @@ function TurnRail(props: TurnNavigatorProps & { index?: Map<string, string>; roo
         onClick={(event) => {
           if (!list) return
           const box = list.getBoundingClientRect()
-          const ids = turns()
+          const ids = marks()
           const id = ids[railHit(event.clientY - box.top, box.height, ids.length).index]
 
-          if (id) props.onSelect(id)
+          if (!id) return
+
+          if (hintReady() && !hint.used) setHint("used", true)
+          props.onSelect(id)
         }}
       >
         <div ref={list} class="flex min-h-0 flex-col">
-          <For each={turns()}>
+          <For each={marks()}>
             {(id, index) => (
               <div
                 data-turn={id}
@@ -352,7 +392,7 @@ function TurnRail(props: TurnNavigatorProps & { index?: Map<string, string>; roo
                 // Active state wins so a clicked or visible turn stays active under the pointer. The hovered tick is
                 // still the brightest: it lights at once and cools off as the pointer moves on.
                 data-state={active(id) ? "active" : hovered(id) ? "hovered" : "default"}
-                class="flex h-2.5 min-h-0 w-full shrink items-center ps-2.5 [--tick-color:var(--v2-background-bg-layer-04)] [--tick-opacity:1] [[data-color-scheme=dark]_&]:data-[state=default]:[--tick-opacity:0.7] data-[state=active]:[--tick-color:var(--v2-icon-icon-muted)]"
+                class="flex h-2 min-h-1 w-full shrink items-center ps-2.5 [--tick-color:var(--v2-background-bg-layer-04)] [--tick-opacity:1] [[data-color-scheme=dark]_&]:data-[state=default]:[--tick-opacity:0.7] data-[state=active]:[--tick-color:var(--v2-icon-icon-muted)]"
               >
                 <span
                   ref={(element) => {
@@ -361,7 +401,7 @@ function TurnRail(props: TurnNavigatorProps & { index?: Map<string, string>; roo
                     ticks.set(id, { element, scale })
                     onCleanup(() => ticks.delete(id))
                   }}
-                  class="block h-0.5 shrink-0 origin-left bg-(--tick-color) rtl:origin-right"
+                  class="block h-px shrink-0 origin-left bg-(--tick-color) rtl:origin-right"
                   style={{
                     width: `${tickWidths.peak}px`,
                     opacity: hovered(id) ? 1 : "var(--tick-opacity)",
@@ -384,10 +424,7 @@ function TurnRail(props: TurnNavigatorProps & { index?: Map<string, string>; roo
           {(item) => (
             <>
               <div class="rounded-md bg-v2-background-bg-layer-02 px-2 py-1">
-                <p
-                  dir="auto"
-                  class="max-h-12 overflow-hidden text-[13px] font-medium leading-text-compact text-v2-text-text-base [mask-image:linear-gradient(to_bottom,#000_32px,transparent_48px)]"
-                >
+                <p dir="auto" class="line-clamp-6 text-[13px] font-medium leading-text-compact text-v2-text-text-base">
                   {item().prompt}
                 </p>
               </div>
@@ -395,11 +432,16 @@ function TurnRail(props: TurnNavigatorProps & { index?: Map<string, string>; roo
                 {(text) => (
                   <p
                     dir="auto"
-                    class="mt-1.5 max-h-16 overflow-hidden px-2 text-[13px] leading-text-compact text-v2-text-text-muted [mask-image:linear-gradient(to_bottom,#000_48px,transparent_64px)]"
+                    class="mt-1.5 line-clamp-3 px-2 text-[13px] leading-text-compact text-v2-text-text-muted"
                   >
                     {text()}
                   </p>
                 )}
+              </Show>
+              <Show when={hintReady() && !hint.used}>
+                <div class="mt-1.5 px-2 text-[12px] leading-text-compact text-v2-text-text-faint">
+                  {language.t("session.turnNavigator.hint")}
+                </div>
               </Show>
             </>
           )}
@@ -422,7 +464,9 @@ function replyText(messages: SessionMessageAssistant[]) {
 }
 
 function previewText(text: string) {
-  return text.replace(/\s+/g, " ").trim().slice(0, previewLength)
+  const flat = text.replace(/\s+/g, " ").trim()
+
+  return flat.length > previewLength ? `${flat.slice(0, previewLength)}…` : flat
 }
 
 /**

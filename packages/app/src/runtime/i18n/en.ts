@@ -575,6 +575,7 @@ export const dict = {
   "session.files.selectToOpen": "Select a file to open",
 
   "session.messages.loading": "Loading messages…",
+  "session.turnNavigator.hint": "Click to jump to this message",
   "session.messages.jumpToLatest": "Jump to latest",
   "session.activity.subagents.one": "{{count}} subagent",
   "session.activity.subagents.other": "{{count}} subagents",
