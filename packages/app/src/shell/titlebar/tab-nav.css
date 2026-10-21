@@ -144,6 +144,34 @@
   background: linear-gradient(var(--tab-overlay), var(--tab-overlay)), var(--tab-base);
 }
 
+/* The sidebar hover experiment: one pill glides behind the rows, which keep only their own pressed and focus states. */
+[data-sidebar-hover="glide"] {
+  position: relative;
+  isolation: isolate;
+}
+
+[data-slot="sidebar-hover-pill"] > * {
+  background:
+    linear-gradient(var(--v2-overlay-simple-overlay-hover), var(--v2-overlay-simple-overlay-hover)),
+    var(--v2-background-bg-deep);
+}
+
+[data-sidebar-hover="glide"]
+  :is(
+    [data-titlebar-tab]:not(:has(> [data-slot="tab-link"]:focus-visible)),
+    [data-titlebar-tab-action]:not(:focus-visible)
+  ):not(:active, [data-state="pressed"], [data-dragging="true"], [data-editing="true"]),
+[data-sidebar-hover="glide"]
+  [data-titlebar-tab]:not(:has(> [data-slot="tab-link"]:focus-visible)):not(
+    :active,
+    [data-state="pressed"],
+    [data-dragging="true"],
+    [data-editing="true"]
+  )
+  [data-slot="tab-close"] {
+  background: none;
+}
+
 [data-titlebar-tab][data-editing="true"] [data-slot="tab-close"] {
   display: none;
 }

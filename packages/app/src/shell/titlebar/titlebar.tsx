@@ -32,6 +32,7 @@ import { sessionTabTitle } from "./tab-title"
 import { SessionTabAvatar } from "@/shell/layout/session-tab-avatar"
 import { SessionProgressIndicatorV2 } from "@opencode/session-ui/v2/session-progress-indicator-v2"
 import { RecentlyClosedTabsMenu } from "./recently-closed-tabs-menu"
+import { SidebarHover } from "./sidebar-hover"
 import { useSettingsDialog } from "@/settings/command"
 import { rootSession } from "@/shell/routes/session"
 import { TitlebarItems, useTitlebarItems } from "@/runtime/extension/titlebar-items"
@@ -782,6 +783,7 @@ export function Titlebar(props: { verticalTabs?: { mount?: HTMLElement } }) {
                             mount={mount}
                             ref={(element) => (element.className = "flex size-full min-h-0 flex-col")}
                           >
+                            <SidebarHover />
                             <Show when={!windows()}>
                               {/* Shares the session header's 48px center line. Without traffic lights, Home fills the
                                   start so the row doesn't leave an empty band. */}
