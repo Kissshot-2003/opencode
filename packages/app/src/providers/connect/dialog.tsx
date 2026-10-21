@@ -90,12 +90,14 @@ export const DialogConnectProvider: Component<{
     chatgptWelcome: boolean
     picked: boolean
     stepBack: boolean
+    title: string
   }>({
     completed: false,
     authorization: false,
     chatgptWelcome: false,
     picked: false,
     stepBack: false,
+    title: "",
   })
 
   const language = useLanguage()
@@ -141,6 +143,7 @@ export const DialogConnectProvider: Component<{
               onFirstConnection={(provider) => setState("modelProvider", provider)}
               onAuthorization={(authorization) => setState("authorization", authorization)}
               onStepBack={(stepBack) => setState("stepBack", stepBack)}
+              onTitle={(title) => setState("title", title)}
             />
           )}
         </Match>
@@ -176,11 +179,7 @@ export const DialogConnectProvider: Component<{
         })
       }}
       class="[font-family:var(--v2-font-family-sans)] [&_[data-slot=dialog-header]]:!px-5 [&_[data-slot=dialog-header-title]]:!text-[15px] [&_[data-slot=dialog-header-title]]:!tracking-[-0.13px]"
-      classList={{
-        "[&_[data-slot=dialog-header]]:!pt-4 [&_[data-slot=dialog-header]]:!pb-3":
-          consoleSelected() && !state.modelProvider,
-        "[&_[data-slot=dialog-header]]:!pt-5": !!state.modelProvider,
-      }}
+      classList={{ "[&_[data-slot=dialog-header]]:!pt-5": !!state.modelProvider }}
     >
       <DialogHeader closeLabel={language.t("common.close")}>
         <Switch>
@@ -192,22 +191,29 @@ export const DialogConnectProvider: Component<{
               </div>
             )}
           </Match>
-          <Match when={controller.selected() && (!props.standalone || state.stepBack)}>
-            <button
-              type="button"
-              class="flex size-5 items-center justify-center rounded-sm text-v2-icon-icon-muted hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
-              onClick={() => back.current()}
-              aria-label={language.t("common.goBack")}
-            >
-              <Icon name="arrow-left" size="small" />
-            </button>
-          </Match>
-          <Match when={!props.standalone}>
-            <DialogTitle>{language.t("command.provider.connect")}</DialogTitle>
+          <Match when={controller.selected()}>
+            {(provider) => (
+              <div class="flex min-w-0 flex-1 items-center gap-2">
+                <Show when={!props.standalone || state.stepBack}>
+                  <button
+                    type="button"
+                    class="-my-0.5 -ms-0.5 flex size-5 shrink-0 items-center justify-center rounded-sm text-v2-icon-icon-muted hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
+                    onClick={() => back.current()}
+                    aria-label={language.t("common.goBack")}
+                  >
+                    <Icon name="arrow-left" size="small" />
+                  </button>
+                </Show>
+                <ProviderModelIcon
+                  provider={{ id: provider(), name: state.title }}
+                  class="shrink-0 text-v2-icon-icon-base"
+                />
+                <DialogTitle>{state.title}</DialogTitle>
+              </div>
+            )}
           </Match>
           <Match when={true}>
-            {/* Holds the back button's space so the content doesn't shift when it appears. */}
-            <span aria-hidden="true" class="size-5" />
+            <DialogTitle>{language.t("command.provider.connect")}</DialogTitle>
           </Match>
         </Switch>
       </DialogHeader>
@@ -436,6 +442,7 @@ function ProviderConnection(props: {
   onFirstConnection: (provider: { id: string; name: string }) => void
   onAuthorization: (authorization: boolean) => void
   onStepBack: (stepBack: boolean) => void
+  onTitle: (title: string) => void
   accounts?: boolean
 }) {
   const dialog = useDialog()
@@ -661,6 +668,29 @@ function ProviderConnection(props: {
     controller.currentMethod()?.type === "oauth" &&
     controller.auth.state() !== "error" &&
     controller.authorization()?.mode === "auto"
+
+  createEffect(() => {
+    if (showAccounts()) return props.onTitle(provider().name)
+
+    if (isConsole && controller.auth.state() === "error")
+      return props.onTitle(language.t("provider.connect.opencode.errorTitle"))
+
+    if (consoleSignIn())
+      return props.onTitle(
+        language.t(
+          props.provider === "opencode-go" ? "provider.connect.console.titleGo" : "provider.connect.console.title",
+        ),
+      )
+
+    if (props.provider === "anthropic" && controller.currentMethod()?.label?.toLowerCase().includes("max"))
+      return props.onTitle(language.t("provider.connect.title.anthropicProMax"))
+
+    props.onTitle(
+      language.t("provider.connect.title", {
+        provider: props.provider === "opencode" ? language.t("provider.connect.opencode.name") : provider().name,
+      }),
+    )
+  })
 
   // Asks one visible field at a time, like the TUI, so `when` conditions see every earlier answer.
   function AuthFormView() {
@@ -1358,113 +1388,112 @@ function ProviderConnection(props: {
 
   function AccountsView() {
     return (
-      <div data-component="provider-accounts" class="flex flex-col gap-3">
+      <div data-component="provider-accounts" class="flex flex-col">
+        <div role="radiogroup" aria-label={language.t("dialog.provider.accounts.connected")} class="flex flex-col">
+          <For each={accounts()}>
+            {(account) => (
+              <Show
+                when={state.confirming !== account.id}
+                fallback={
+                  <div class="flex min-h-9 items-center gap-2 rounded-md px-3 text-[13px] leading-5 tracking-[-0.04px]">
+                    <span role="alert" class="min-w-0 flex-1 truncate font-[440] text-v2-text-text-base">
+                      {language.t("dialog.provider.accounts.removeConfirm", { account: account.label })}
+                    </span>
+                    <Button variant="ghost-muted" onClick={() => setState("confirming", undefined)}>
+                      {language.t("common.cancel")}
+                    </Button>
+                    <Button variant="neutral" onClick={() => void removeAccount(account)}>
+                      {language.t("dialog.provider.accounts.remove")}
+                    </Button>
+                  </div>
+                }
+              >
+                <div class="group relative flex min-h-9 items-center rounded-md hover:bg-v2-overlay-simple-overlay-hover focus-within:bg-v2-overlay-simple-overlay-hover has-[[data-expanded]]:bg-v2-overlay-simple-overlay-hover">
+                  <Show
+                    when={state.renaming !== account.id}
+                    fallback={
+                      <div class="flex min-h-9 min-w-0 flex-1 items-center ps-9 pe-3">
+                        <AccountNameInput
+                          value={account.label}
+                          class="-ms-1 max-w-full text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-base"
+                          onSave={(label) => accountActions.rename(account, label)}
+                          onClose={() => setState("renaming", undefined)}
+                        />
+                      </div>
+                    }
+                  >
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={activeAccount() === account.id}
+                      class="flex min-h-9 min-w-0 flex-1 items-center gap-2 px-3 text-start text-[13px] leading-5 tracking-[-0.04px] focus-visible:outline-none"
+                      disabled={state.switching !== undefined}
+                      onClick={() => selectAccount(account)}
+                    >
+                      <span class="flex size-4 shrink-0 items-center justify-center">
+                        <Show when={activeAccount() === account.id}>
+                          <Icon name="check" size="small" class="text-v2-icon-icon-base" />
+                        </Show>
+                      </span>
+                      <span class="min-w-0 truncate font-[440] text-v2-text-text-base">{account.label}</span>
+                      <Show when={account.status}>
+                        {(status) => (
+                          <span
+                            data-slot="provider-account-status"
+                            title={status().message}
+                            class="ms-auto shrink-0 font-[440] text-[var(--v2-state-fg-warning)]"
+                          >
+                            {language.t("dialog.provider.signInRequired")}
+                          </span>
+                        )}
+                      </Show>
+                    </button>
+                  </Show>
+                  <div class="hover-reveal flex shrink-0 items-center pe-1.5 group-hover:opacity-100 focus-within:opacity-100 has-[[data-expanded]]:opacity-100">
+                    <Menu gutter={4} modal={false} placement="bottom-end">
+                      <Menu.Trigger
+                        as={IconButton}
+                        variant="ghost-muted"
+                        size="small"
+                        icon={<Icon name="outline-dots" />}
+                        disabled={state.switching !== undefined}
+                        aria-label={language.t("dialog.provider.accounts.options", { account: account.label })}
+                      />
+                      {/* The modal dialog aria-hides anything added outside it, this portal included, a frame
+                            after it opens. Kobalte leaves a node marked as a top layer visible. */}
+                      <Menu.Portal
+                        ref={(el) => {
+                          el.dataset.reactAriaTopLayer = "true"
+                        }}
+                      >
+                        <Menu.Content onCloseAutoFocus={(event) => state.renaming && event.preventDefault()}>
+                          <Menu.Item onSelect={() => setState({ renaming: account.id, confirming: undefined })}>
+                            {language.t("common.rename")}
+                          </Menu.Item>
+                          <Menu.Item onSelect={() => setState({ confirming: account.id, renaming: undefined })}>
+                            {language.t("dialog.provider.accounts.remove")}
+                          </Menu.Item>
+                        </Menu.Content>
+                      </Menu.Portal>
+                    </Menu>
+                  </div>
+                </div>
+              </Show>
+            )}
+          </For>
+        </div>
         <button
           type="button"
           data-action="provider-account-add"
-          class="flex min-h-9 w-full items-center gap-2 rounded-md px-3 text-left text-[13px] leading-5 tracking-[-0.04px] hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none disabled:pointer-events-none"
+          class="flex h-9 w-full items-center gap-2 rounded-md px-3 text-start text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-muted hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:text-v2-text-text-base focus-visible:outline-none disabled:pointer-events-none"
           disabled={state.switching !== undefined || controller.methods().length === 0}
           onClick={addAccount}
         >
-          <Icon name="plus" size="small" class="shrink-0 text-v2-icon-icon-muted" />
-          <span class="font-[530] text-v2-text-text-base">{language.t("dialog.provider.accounts.add")}</span>
+          <span class="flex size-4 shrink-0 items-center justify-center">
+            <Icon name="plus" size="small" class="text-v2-icon-icon-muted" />
+          </span>
+          {language.t("dialog.provider.accounts.add")}
         </button>
-        <section class="flex flex-col">
-          <div class="px-3 pb-2 text-[13px] font-[440] leading-text-compact tracking-[-0.04px] text-v2-text-text-muted">
-            {language.t("dialog.provider.accounts.connected")}
-          </div>
-          <div role="radiogroup" aria-label={language.t("dialog.provider.accounts.connected")} class="flex flex-col">
-            <For each={accounts()}>
-              {(account) => (
-                <Show
-                  when={state.confirming !== account.id}
-                  fallback={
-                    <div class="flex min-h-9 items-center gap-2 rounded-md px-3 text-[13px] leading-5 tracking-[-0.04px]">
-                      <span role="alert" class="min-w-0 flex-1 truncate font-[440] text-v2-text-text-base">
-                        {language.t("dialog.provider.accounts.removeConfirm", { account: account.label })}
-                      </span>
-                      <Button variant="ghost-muted" onClick={() => setState("confirming", undefined)}>
-                        {language.t("common.cancel")}
-                      </Button>
-                      <Button variant="neutral" onClick={() => void removeAccount(account)}>
-                        {language.t("dialog.provider.accounts.remove")}
-                      </Button>
-                    </div>
-                  }
-                >
-                  <div class="group relative flex min-h-9 items-center rounded-md hover:bg-v2-overlay-simple-overlay-hover focus-within:bg-v2-overlay-simple-overlay-hover">
-                    <Show
-                      when={state.renaming !== account.id}
-                      fallback={
-                        <div class="flex min-h-9 min-w-0 flex-1 items-center px-3">
-                          <AccountNameInput
-                            value={account.label}
-                            class="-ms-1 max-w-full text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-base"
-                            onSave={(label) => accountActions.rename(account, label)}
-                            onClose={() => setState("renaming", undefined)}
-                          />
-                        </div>
-                      }
-                    >
-                      <button
-                        type="button"
-                        role="radio"
-                        aria-checked={activeAccount() === account.id}
-                        class="flex min-h-9 min-w-0 flex-1 items-center gap-2 px-3 text-left text-[13px] leading-5 tracking-[-0.04px] focus-visible:outline-none"
-                        disabled={state.switching !== undefined}
-                        onClick={() => selectAccount(account)}
-                      >
-                        <span class="min-w-0 truncate font-[440] text-v2-text-text-base">{account.label}</span>
-                        <Show when={activeAccount() === account.id}>
-                          <Icon name="check" size="small" class="shrink-0 text-v2-icon-icon-base" />
-                        </Show>
-                        <Show when={account.status}>
-                          {(status) => (
-                            <span
-                              data-slot="provider-account-status"
-                              title={status().message}
-                              class="ml-auto shrink-0 font-[440] text-[var(--v2-state-fg-warning)]"
-                            >
-                              {language.t("dialog.provider.signInRequired")}
-                            </span>
-                          )}
-                        </Show>
-                      </button>
-                    </Show>
-                    <div class="flex shrink-0 items-center pe-1.5">
-                      <Menu gutter={4} modal={false} placement="bottom-end">
-                        <Menu.Trigger
-                          as={IconButton}
-                          variant="ghost-muted"
-                          size="small"
-                          icon={<Icon name="outline-dots" />}
-                          disabled={state.switching !== undefined}
-                          aria-label={language.t("dialog.provider.accounts.options", { account: account.label })}
-                        />
-                        {/* The modal dialog aria-hides anything added outside it, this portal included, a frame
-                            after it opens. Kobalte leaves a node marked as a top layer visible. */}
-                        <Menu.Portal
-                          ref={(el) => {
-                            el.dataset.reactAriaTopLayer = "true"
-                          }}
-                        >
-                          <Menu.Content onCloseAutoFocus={(event) => state.renaming && event.preventDefault()}>
-                            <Menu.Item onSelect={() => setState({ renaming: account.id, confirming: undefined })}>
-                              {language.t("common.rename")}
-                            </Menu.Item>
-                            <Menu.Item onSelect={() => setState({ confirming: account.id, renaming: undefined })}>
-                              {language.t("dialog.provider.accounts.remove")}
-                            </Menu.Item>
-                          </Menu.Content>
-                        </Menu.Portal>
-                      </Menu>
-                    </div>
-                  </div>
-                </Show>
-              )}
-            </For>
-          </div>
-        </section>
       </div>
     )
   }
@@ -1651,106 +1680,72 @@ function ProviderConnection(props: {
 
   return (
     <Show when={!state.models} fallback={<FirstConnectionModels />}>
-      <div class="flex min-h-0 flex-1 flex-col">
-        <div
-          class={isConsole ? "flex shrink-0 items-center gap-2 px-3 pb-6" : "flex h-10 shrink-0 items-start gap-2 px-3"}
-        >
-          <ProviderModelIcon
-            provider={provider()}
-            class={isConsole ? "shrink-0 text-v2-icon-icon-base" : "mt-0.5 shrink-0 text-v2-icon-icon-base"}
-          />
-          <div class="text-[15px] font-[530] leading-5 tracking-[-0.13px] text-v2-text-text-base">
-            <DialogTitle>
-              <Switch>
-                <Match when={showAccounts()}>{provider().name}</Match>
-                <Match when={isConsole && controller.auth.state() === "error"}>
-                  {language.t("provider.connect.opencode.errorTitle")}
-                </Match>
-                <Match when={consoleSignIn()}>
-                  {language.t(
-                    props.provider === "opencode-go"
-                      ? "provider.connect.console.titleGo"
-                      : "provider.connect.console.title",
-                  )}
-                </Match>
-                <Match
-                  when={
-                    props.provider === "anthropic" && controller.currentMethod()?.label?.toLowerCase().includes("max")
-                  }
-                >
-                  {language.t("provider.connect.title.anthropicProMax")}
-                </Match>
-                <Match when={props.provider === "opencode"}>
-                  {language.t("provider.connect.title", { provider: language.t("provider.connect.opencode.name") })}
-                </Match>
-                <Match when={true}>{language.t("provider.connect.title", { provider: provider().name })}</Match>
-              </Switch>
-            </DialogTitle>
+      <div
+        data-component="provider-connect-content"
+        class={
+          isConsole
+            ? `flex min-h-0 flex-1 flex-col overflow-y-auto ${showAccounts() ? "pb-2" : "pb-4"}`
+            : "flex min-h-0 flex-1 flex-col"
+        }
+      >
+        <Show when={remote}>
+          <div class="mb-5 px-3">
+            <RemoteAuthNotice server={sdk.server} />
           </div>
-        </div>
-        <div
-          data-component="provider-connect-content"
-          class={isConsole ? "flex min-h-0 flex-1 flex-col overflow-y-auto pb-4" : "flex min-h-0 flex-1 flex-col"}
-        >
-          <Show when={remote}>
-            <div class="mb-5 px-3">
-              <RemoteAuthNotice server={sdk.server} />
+        </Show>
+        <Switch>
+          <Match when={state.noModels && controller.auth.state() !== "error"}>
+            <ConsoleNoModels />
+          </Match>
+          <Match when={consoleSignIn()}>
+            <div class="px-3">
+              <ConsoleAuthorization
+                code={code()}
+                browserFailed={controller.browserFailed()}
+                copied={state.copied}
+                copyFailed={state.copyFailed}
+                onCopy={() => void copyLink()}
+                onOpen={() => void controller.auth.open()}
+              />
             </div>
-          </Show>
-          <Switch>
-            <Match when={state.noModels && controller.auth.state() !== "error"}>
-              <ConsoleNoModels />
-            </Match>
-            <Match when={consoleSignIn()}>
-              <div class="px-3">
-                <ConsoleAuthorization
-                  code={code()}
-                  browserFailed={controller.browserFailed()}
-                  copied={state.copied}
-                  copyFailed={state.copyFailed}
-                  onCopy={() => void copyLink()}
-                  onOpen={() => void controller.auth.open()}
-                />
-              </div>
-            </Match>
-            <Match when={showAccounts() && controller.methodIndex() === undefined}>
-              <AccountsView />
-            </Match>
-            <Match when={controller.busy()}>
-              <div class="px-3">
-                <StatusRow>{language.t("provider.connect.status.inProgress")}</StatusRow>
-              </div>
-            </Match>
-            <Match when={controller.methodIndex() === undefined && controller.methods().length === 0}>
-              <div class="px-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-muted">
-                {language.t("dialog.provider.environmentOnly")}
-              </div>
-            </Match>
-            <Match when={controller.methodIndex() === undefined}>
-              <MethodSelection />
-            </Match>
-            <Match when={controller.auth.state() === "form"}>
-              <AuthFormView />
-            </Match>
-            <Match when={controller.auth.state() === "error"}>
-              <div class="px-3">
-                <ErrorRow />
-              </div>
-            </Match>
-            <Match when={controller.currentMethod()?.type === "command"}>
-              <CommandView />
-            </Match>
-            <Match when={controller.currentMethod()?.type === "key"}>
-              <ApiAuthView />
-            </Match>
-            <Match when={controller.authorization()?.mode === "code"}>
-              <OAuthCodeView />
-            </Match>
-            <Match when={controller.authorization()?.mode === "auto"}>
-              <OAuthAutoView />
-            </Match>
-          </Switch>
-        </div>
+          </Match>
+          <Match when={showAccounts() && controller.methodIndex() === undefined}>
+            <AccountsView />
+          </Match>
+          <Match when={controller.busy()}>
+            <div class="px-3">
+              <StatusRow>{language.t("provider.connect.status.inProgress")}</StatusRow>
+            </div>
+          </Match>
+          <Match when={controller.methodIndex() === undefined && controller.methods().length === 0}>
+            <div class="px-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-muted">
+              {language.t("dialog.provider.environmentOnly")}
+            </div>
+          </Match>
+          <Match when={controller.methodIndex() === undefined}>
+            <MethodSelection />
+          </Match>
+          <Match when={controller.auth.state() === "form"}>
+            <AuthFormView />
+          </Match>
+          <Match when={controller.auth.state() === "error"}>
+            <div class="px-3">
+              <ErrorRow />
+            </div>
+          </Match>
+          <Match when={controller.currentMethod()?.type === "command"}>
+            <CommandView />
+          </Match>
+          <Match when={controller.currentMethod()?.type === "key"}>
+            <ApiAuthView />
+          </Match>
+          <Match when={controller.authorization()?.mode === "code"}>
+            <OAuthCodeView />
+          </Match>
+          <Match when={controller.authorization()?.mode === "auto"}>
+            <OAuthAutoView />
+          </Match>
+        </Switch>
       </div>
     </Show>
   )
