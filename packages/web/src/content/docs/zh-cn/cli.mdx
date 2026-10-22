@@ -37,8 +37,12 @@ opencode [project]
 | <nobr><code>{"--prompt"}</code></nobr>   |      | 要使用的提示词                                            |
 | <nobr><code>{"--model"}</code></nobr>    | `-m` | 要使用的模型，格式为 provider/model                       |
 | <nobr><code>{"--agent"}</code></nobr>    |      | 要使用的代理                                              |
+| <nobr><code>{"--auto"}</code></nobr>     |      | 自动批准没有被显式拒绝的权限                              |
 | <nobr><code>{"--port"}</code></nobr>     |      | 监听端口                                                  |
 | <nobr><code>{"--hostname"}</code></nobr> |      | 监听主机名                                                |
+| <nobr><code>{"--mdns"}</code></nobr>     |      | 启用 mDNS 发现                                            |
+| <nobr><code>{"--mdns-domain"}</code></nobr> |   | 自定义 mDNS 域名                                          |
+| <nobr><code>{"--cors"}</code></nobr>     |      | 允许 CORS 的额外浏览器来源                                |
 
 ---
 
@@ -98,6 +102,13 @@ opencode auth login
 ```
 
 OpenCode 启动时会从凭据文件加载提供商信息，同时也会加载环境变量或项目中 `.env` 文件中定义的密钥。
+
+##### 标志
+
+| 标志                                     | 简写 | 描述                               |
+| ---------------------------------------- | ----- | ---------------------------------- |
+| <nobr><code>{"--provider"}</code></nobr> | `-p`  | 要登录的提供商 ID 或名称           |
+| <nobr><code>{"--method"}</code></nobr>   | `-m`  | 要使用的登录方式标签，跳过方式选择 |
 
 ---
 
@@ -325,6 +336,7 @@ opencode run --attach http://localhost:4096 "Explain async/await in JavaScript"
 | <nobr><code>{"--variant"}</code></nobr>  |      | 模型变体（特定于提供商的推理级别）                                  |
 | <nobr><code>{"--thinking"}</code></nobr> |      | 显示思考块                                                          |
 | <nobr><code>{"--port"}</code></nobr>     |      | 本地服务器端口（默认为随机端口）                                    |
+| <nobr><code>{"--auto"}</code></nobr>     |      | 自动批准没有被显式拒绝的权限                                        |
 
 ---
 
@@ -345,6 +357,7 @@ opencode serve
 | <nobr><code>{"--port"}</code></nobr>     | 监听端口                   |
 | <nobr><code>{"--hostname"}</code></nobr> | 监听主机名                 |
 | <nobr><code>{"--mdns"}</code></nobr>     | 启用 mDNS 发现             |
+| <nobr><code>{"--mdns-domain"}</code></nobr> | 自定义 mDNS 域名       |
 | <nobr><code>{"--cors"}</code></nobr>     | 允许 CORS 的额外浏览器来源 |
 
 ---
@@ -376,6 +389,16 @@ opencode session list
 
 ---
 
+#### delete
+
+删除一个 OpenCode 会话。
+
+```bash
+opencode session delete <sessionID>
+```
+
+---
+
 ### stats
 
 显示 OpenCode 会话的 Token 用量和费用统计信息。
@@ -404,6 +427,12 @@ opencode export [sessionID]
 ```
 
 如果您不提供会话 ID，系统将提示您从可用的会话中进行选择。
+
+#### 标志
+
+| 标志                                     | 描述                           |
+| ---------------------------------------- | ------------------------------ |
+| <nobr><code>{"--sanitize"}</code></nobr> | 脱敏会话记录/文件中的敏感数据 |
 
 ---
 
@@ -438,6 +467,7 @@ opencode web
 | <nobr><code>{"--port"}</code></nobr>     | 监听端口                   |
 | <nobr><code>{"--hostname"}</code></nobr> | 监听主机名                 |
 | <nobr><code>{"--mdns"}</code></nobr>     | 启用 mDNS 发现             |
+| <nobr><code>{"--mdns-domain"}</code></nobr> | 自定义 mDNS 域名       |
 | <nobr><code>{"--cors"}</code></nobr>     | 允许 CORS 的额外浏览器来源 |
 
 ---
@@ -459,6 +489,114 @@ opencode acp
 | <nobr><code>{"--cwd"}</code></nobr>      | 工作目录   |
 | <nobr><code>{"--port"}</code></nobr>     | 监听端口   |
 | <nobr><code>{"--hostname"}</code></nobr> | 监听主机名 |
+| <nobr><code>{"--mdns"}</code></nobr>     | 启用 mDNS 发现 |
+| <nobr><code>{"--mdns-domain"}</code></nobr> | 自定义 mDNS 域名 |
+| <nobr><code>{"--cors"}</code></nobr>     | 允许 CORS 的额外浏览器来源 |
+
+---
+
+### plugin
+
+安装插件并更新你的配置。
+
+```bash
+opencode plugin <module>
+```
+
+也可以用别名。
+
+```bash
+opencode plug <module>
+```
+
+#### 标志
+
+| 标志                                    | 简写 | 描述                 |
+| --------------------------------------- | ---- | -------------------- |
+| <nobr><code>{"--global"}</code></nobr> | `-g` | 安装到全局配置       |
+| <nobr><code>{"--force"}</code></nobr>  | `-f` | 替换已安装的插件版本 |
+
+---
+
+### pr
+
+拉取并检出一个 GitHub PR 分支，然后运行 OpenCode。
+
+```bash
+opencode pr <number>
+```
+
+---
+
+### db
+
+数据库工具。
+
+```bash
+opencode db [query]
+```
+
+#### 标志
+
+| 标志                                   | 描述                    |
+| -------------------------------------- | ----------------------- |
+| <nobr><code>{"--format"}</code></nobr> | 输出格式：`json` 或 `tsv` |
+
+---
+
+#### path
+
+打印数据库路径。
+
+```bash
+opencode db path
+```
+
+---
+
+### debug
+
+调试与排障工具。
+
+```bash
+opencode debug [command]
+```
+
+---
+
+#### agents
+
+列出所有代理。
+
+```bash
+opencode debug agents
+```
+
+---
+
+#### config
+
+列出配置来源。
+
+```bash
+opencode debug config
+```
+
+---
+
+#### paths
+
+显示全局路径（data、config、cache、state）。
+
+```bash
+opencode debug paths
+```
+
+传一个名字可以只打印单个路径：`db`、`home`、`data`、`config`、`cache`、`state`、`tmp`、`bin`、`log` 或 `repos`。
+
+```bash
+opencode debug paths db
+```
 
 ---
 
@@ -519,6 +657,7 @@ OpenCode CLI 接受以下全局标志。
 | <nobr><code>{"--version"}</code></nobr>    | `-v` | 打印版本号                           |
 | <nobr><code>{"--print-logs"}</code></nobr> |      | 将日志输出到 stderr                  |
 | <nobr><code>{"--log-level"}</code></nobr>  |      | 日志级别（DEBUG、INFO、WARN、ERROR） |
+| <nobr><code>{"--pure"}</code></nobr>       |      | 不加载外部插件运行                 |
 
 ---
 
@@ -545,9 +684,11 @@ OpenCode 可以通过环境变量进行配置。
 | `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` | boolean | 禁用读取 `~/.claude/CLAUDE.md`          |
 | `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` | boolean | 禁用加载 `.claude/skills`               |
 | `OPENCODE_DISABLE_MODELS_FETCH`       | boolean | 禁用从远程源获取模型                    |
+| `OPENCODE_DISABLE_MOUSE`              | boolean | 在 TUI 中禁用鼠标捕获                  |
 | `OPENCODE_FAKE_VCS`                   | string  | 用于测试目的的模拟 VCS 提供商           |
 | `OPENCODE_CLIENT`                     | string  | 客户端标识符（默认为 `cli`）            |
 | `OPENCODE_ENABLE_EXA`                 | boolean | 启用 Exa 网络搜索工具                   |
+| `OPENCODE_ENABLE_PARALLEL`            | boolean | 启用 Parallel 网络搜索工具              |
 | `OPENCODE_SERVER_PASSWORD`            | string  | 为 `serve`/`web` 启用基本认证           |
 | `OPENCODE_SERVER_USERNAME`            | string  | 覆盖基本认证用户名（默认为 `opencode`） |
 | `OPENCODE_MODELS_URL`                 | string  | 自定义模型配置获取 URL                  |
