@@ -141,9 +141,109 @@ opencode run "Hello world"
 
 ---
 
+### 托管设置
+
+组织可以下发用户无法覆盖的配置。托管设置在优先级中处于最高一档。
+
+#### 基于文件
+
+把 `opencode.json` 或 `opencode.jsonc` 放到系统托管配置目录：
+
+| 平台    | 路径                                     |
+| ------- | ---------------------------------------- |
+| macOS   | `/Library/Application Support/opencode/` |
+| Linux   | `/etc/opencode/`                         |
+| Windows | `%ProgramData%\opencode`                 |
+
+这些目录需要管理员/root 权限才能写入，因此用户无法修改它们。
+
+#### macOS 托管偏好设置
+
+在 macOS 上，OpenCode 从 `ai.opencode.managed` 偏好设置域读取托管配置。通过 MDM（Jamf、Kandji、FleetDM）下发 `.mobileconfig` 即可自动强制生效。
+
+OpenCode 会检查以下路径：
+
+1. `/Library/Managed Preferences/<user>/ai.opencode.managed.plist`
+2. `/Library/Managed Preferences/ai.opencode.managed.plist`
+
+plist 的键直接对应 `opencode.json` 的字段。MDM 的元数据键（`PayloadUUID`、`PayloadType` 等）会被自动去掉。
+
+**创建 `.mobileconfig`**
+
+使用 `ai.opencode.managed` 作为 PayloadType。OpenCode 的配置键直接写在 payload 的 dict 里：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key>
+      <string>ai.opencode.managed</string>
+      <key>PayloadIdentifier</key>
+      <string>com.example.opencode.config</string>
+      <key>PayloadUUID</key>
+      <string>GENERATE-YOUR-OWN-UUID</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>server</key>
+      <dict>
+        <key>hostname</key>
+        <string>127.0.0.1</string>
+      </dict>
+      <key>permission</key>
+      <dict>
+        <key>*</key>
+        <string>ask</string>
+        <key>shell</key>
+        <dict>
+          <key>*</key>
+          <string>ask</string>
+          <key>rm -rf *</key>
+          <string>deny</string>
+        </dict>
+      </dict>
+    </dict>
+  </array>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadIdentifier</key>
+  <string>com.example.opencode</string>
+  <key>PayloadUUID</key>
+  <string>GENERATE-YOUR-OWN-UUID</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+</dict>
+</plist>
+```
+
+用 `uuidgen` 生成唯一的 UUID，并按组织要求调整设置。
+
+**通过 MDM 下发**
+
+- **Jamf Pro：** Computers > Configuration Profiles > Upload，然后指定目标设备或智能组
+- **FleetDM：** 把 `.mobileconfig` 放进你的 gitops 仓库的 `mdm.macos_settings.custom_settings` 下，然后执行 `fleetctl apply`
+
+**在设备上验证**
+
+双击 `.mobileconfig` 即可在本地安装以便测试（会出现在「系统设置 > 隐私与安全性 > 描述文件」中），然后运行：
+
+```bash
+opencode debug config
+```
+
+所有托管偏好设置的键都会出现在解析后的配置里，且无法被用户或项目配置覆盖。
+
+---
+
 ## Schema
 
 配置文件具有在 [**`opencode.ai/config.json`**](https://opencode.ai/config.json) 中定义的 Schema。
+
+TUI 配置使用 [**`opencode.ai/tui.json`**](https://opencode.ai/tui.json)。
 
 您的编辑器应该能够基于该 Schema 进行验证和自动补全。
 
@@ -151,17 +251,26 @@ opencode run "Hello world"
 
 ### TUI
 
-您可以通过 `tui` 选项配置 TUI 相关设置。
+用专门的 `tui.json`（或 `tui.jsonc`）文件配置 TUI 相关设置。
 
-```json title="opencode.json"
+```json title="tui.json"
 {
-  "$schema": "https://opencode.ai/config.json",
-  "tui": {
-    "scroll_speed": 3,
-    "scroll_acceleration": {
-      "enabled": true
-    },
-    "diff_style": "auto"
+  "$schema": "https://opencode.ai/tui.json",
+  "scroll_speed": 3,
+  "scroll_acceleration": {
+    "enabled": true
+  },
+  "diff_style": "auto",
+  "cursor": {
+    "style": "block",
+    "blinking": true
+  },
+  "mouse": true,
+  "attention": {
+    "enabled": true,
+    "notifications": true,
+    "sound": true,
+    "volume": 0.4
   }
 }
 ```
@@ -172,7 +281,13 @@ opencode run "Hello world"
 - `scroll_speed` - 自定义滚动速度倍率（默认值：`3`，最小值：`1`）。如果 `scroll_acceleration.enabled` 为 `true`，则忽略此选项。
 - `diff_style` - 控制差异渲染方式。`"auto"` 根据终端宽度自适应，`"stacked"` 始终显示单列。
 
-[在此了解更多关于 TUI 的信息](/docs/tui)。
+用 `OPENCODE_TUI_CONFIG` 指向自定义的 TUI 配置文件。
+
+当 `cursor.style` 为 `"default"` 时会恢复终端默认光标，因此 `cursor.blinking` 不起作用。
+
+把 `attention.enabled` 设为开启 TUI 的桌面通知和提示音。参见 [TUI attention](/docs/tui#attention)。
+
+`opencode.json` 里旧的 `theme`、`keybinds` 和 `tui` 键已废弃，能自动迁移的会自动迁移。
 
 ---
 
@@ -202,6 +317,21 @@ opencode run "Hello world"
 - `cors` - 从基于浏览器的客户端使用 HTTP 服务器时允许 CORS 的额外来源。值必须是完整的来源（协议 + 主机 + 可选端口），例如 `https://app.example.com`。
 
 [在此了解更多关于服务器的信息](/docs/server)。
+
+---
+
+### Shell
+
+您可以用 `shell` 选项配置交互式终端使用的 shell。兼容的 shell 同样会用于代理的工具调用。
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "shell": "pwsh"
+}
+```
+
+如果不指定，OpenCode 会根据您的操作系统自动发现并使用一个合适的默认值（例如 Windows 上的 `pwsh` 或 `cmd.exe`，macOS/Linux 上的 `/bin/zsh` 或 `/bin/bash`）。您可以提供绝对路径，也可以只写短名称。
 
 ---
 
@@ -261,6 +391,58 @@ opencode run "Hello world"
 
 ---
 
+### 策略
+
+用 `experimental.policies` 选项控制 OpenCode 能否对已配置的资源执行操作。目前策略可以控制 OpenCode 能使用哪些提供商。
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "experimental": {
+    "policies": [
+      {
+        "effect": "deny",
+        "action": "provider.use",
+        "resource": "openai"
+      }
+    ]
+  }
+}
+```
+
+[在此了解更多关于策略的信息](/docs/policies)。
+
+---
+
+### 图片附件
+
+OpenCode 在把图片附件发给模型之前会先做归一化。默认情况下，图片超过 `2000x2000` 像素或 base64 编码后超过 `5242880` 字节时会被缩放。
+
+用 `attachment.image` 选项配置图片附件的限制：
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "attachment": {
+    "image": {
+      "auto_resize": true,
+      "max_width": 2000,
+      "max_height": 2000,
+      "max_base64_bytes": 5242880
+    }
+  }
+}
+```
+
+- `auto_resize` - 在请求提供商之前缩放超出限制的图片。设为 `false` 则直接拒绝过大的图片。
+- `max_width` - 缩放或拒绝之前允许的最大图片宽度（像素）。
+- `max_height` - 缩放或拒绝之前允许的最大图片高度（像素）。
+- `max_base64_bytes` - 编码后图片载荷的最大大小。这里指的是 base64 编码后的载荷大小，不是原始文件大小。
+
+如果缩放后图片仍然放不下，OpenCode 会省略超大的工具结果图片，或者对用户提供的过大图片报图片大小错误。
+
+---
+
 #### 提供商特定选项
 
 一些提供商支持除通用 `timeout` 和 `apiKey` 设置之外的额外配置选项。
@@ -298,12 +480,12 @@ Bearer Token（`AWS_BEARER_TOKEN_BEDROCK` 或 `/connect`）优先于基于配置
 
 ### 主题
 
-您可以通过 OpenCode 配置中的 `theme` 选项设置要使用的主题。
+在 `tui.json` 中设置界面主题。
 
-```json title="opencode.json"
+```json title="tui.json"
 {
-  "$schema": "https://opencode.ai/config.json",
-  "theme": ""
+  "$schema": "https://opencode.ai/tui.json",
+  "theme": "tokyonight"
 }
 ```
 
@@ -354,6 +536,21 @@ Bearer Token（`AWS_BEARER_TOKEN_BEDROCK` 或 `/connect`）优先于基于配置
 
 ---
 
+### 子代理深度
+
+您可以用 `subagent_depth` 选项控制子代理还能嵌套调用多少层子代理。
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "subagent_depth": 2
+}
+```
+
+默认值是 `1`，即允许主代理启动子代理，但不允许这些子代理再启动子代理。设为 `2` 可以再允许一层嵌套的子代理，设为 `0` 则完全禁止启动子代理。
+
+---
+
 ### 命令
 
 您可以通过 `command` 选项为重复任务配置自定义命令。
@@ -382,16 +579,37 @@ Bearer Token（`AWS_BEARER_TOKEN_BEDROCK` 或 `/connect`）优先于基于配置
 
 ### 快捷键
 
-您可以通过 `keybinds` 选项自定义快捷键。
+在 `tui.json` 中用 `keybinds` 自定义 TUI 快捷键。
+
+```json title="tui.json"
+{
+  "$schema": "https://opencode.ai/tui.json",
+  "keybinds": {
+    "command_list": "ctrl+p"
+  }
+}
+```
+
+`keybinds` 会与内置默认值合并，因此您只需要配置想改动的快捷键。
+
+[在此了解更多](/docs/keybinds)。
+
+---
+
+### 快照
+
+OpenCode 用快照跟踪代理操作期间的文件改动，从而支持在会话内撤销和回退。快照默认开启。
+
+对于大型仓库或含大量子模块的项目，快照系统用一个内部 Git 仓库记录所有改动，可能导致索引变慢和可观的磁盘占用。您可以用 `snapshot` 选项关闭快照。
 
 ```json title="opencode.json"
 {
   "$schema": "https://opencode.ai/config.json",
-  "keybinds": {}
+  "snapshot": false
 }
 ```
 
-[在此了解更多](/docs/keybinds)。
+请注意，关闭快照意味着代理做出的改动无法再通过界面回退。
 
 ---
 
@@ -413,7 +631,16 @@ OpenCode 启动时会自动下载新版本。您可以使用 `autoupdate` 选项
 
 ### 格式化程序
 
-您可以通过 `formatter` 选项配置代码格式化程序。
+您可以通过 `formatter` 选项启用和配置代码格式化程序。省略该选项则保持格式化程序关闭。
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "formatter": true
+}
+```
+
+用对象可以在保留内置项的同时配置覆盖项或自定义格式化程序。
 
 ```json title="opencode.json"
 {
@@ -434,6 +661,34 @@ OpenCode 启动时会自动下载新版本。您可以使用 `autoupdate` 选项
 ```
 
 [在此了解更多关于格式化程序的信息](/docs/formatters)。
+
+---
+
+### LSP 服务器
+
+您可以用 `lsp` 选项启用和配置 LSP 服务器。省略该选项则保持 LSP 关闭。
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": true
+}
+```
+
+用对象可以在保留内置项的同时配置覆盖项或自定义的 LSP 服务器。
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "typescript": {
+      "disabled": true
+    }
+  }
+}
+```
+
+[在此了解更多关于 LSP 服务器的信息](/docs/lsp)。
 
 ---
 
