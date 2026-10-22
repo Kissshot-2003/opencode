@@ -174,7 +174,7 @@ description: 管理 LLM 可以使用的工具。
 
 ---
 
-### patch
+### apply_patch
 
 对文件应用补丁。
 
@@ -189,8 +189,12 @@ description: 管理 LLM 可以使用的工具。
 
 该工具将补丁文件应用到您的代码库中。适用于应用来自各种来源的 diff 和补丁。
 
+处理 `tool.execute.before` 或 `tool.execute.after` 钩子时，请检查 `input.tool === "apply_patch"`（而不是 `"patch"`）。
+
+`apply_patch` 使用 `output.args.patchText` 而不是 `output.args.filePath`。路径嵌在 `patchText` 的标记行中，并且相对于项目根目录（例如：`*** Add File: src/new-file.ts`、`*** Update File: src/existing.ts`、`*** Move to: src/renamed.ts`、`*** Delete File: src/obsolete.ts`）。
+
 :::note
-`patch` 工具由 `edit` 权限控制，该权限涵盖所有文件修改操作（`edit`、`write`、`patch`）。
+`apply_patch` 工具由 `edit` 权限控制，该权限涵盖所有文件修改操作（`edit`、`write`、`apply_patch`）。
 :::
 
 ---
